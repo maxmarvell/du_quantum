@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "qiskit": {
+      "source": "k-dense-ai/scientific-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/qiskit/SKILL.md",
+      "computedHash": "b570ccb7c18093404ed878cea5c50071ebfcf867f7691a2a2e7f98eac92020b7"
+    }
+  }
+}
