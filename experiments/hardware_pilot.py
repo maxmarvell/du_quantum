@@ -78,8 +78,22 @@ def best_transpile(qc: QuantumCircuit, backend) -> QuantumCircuit:
     return (best_clean or best_any)[1]
 
 
-def preflight(backend, t_values: tuple = T_VALUES, shots: int = SHOTS) -> dict:
-    """Transpile every T, report the resource table, return per-T artifacts."""
+def preflight(backend, t_values: tuple = T_VALUES, shots: int = SHOTS,
+              epsilon: float = 0.0) -> dict:
+    """Transpile every T, report the resource table, return per-T artifacts.
+
+    epsilon > 0 perturbs the transverse field to b = pi/4 - epsilon, breaking
+    dual-unitarity: the noiseless edge signal itself decays (e.g. T=2 edge =
+    0.851 / 0.518 at eps = 0.1 / 0.2), on top of the hardware F_est factor.
+    """
+    from qiskit.quantum_info import Operator
+    from du.simulation import is_dual_unitary, kicked_ising_gate
+
+    b = TRANSVERSE_FIELD - epsilon
+    du = is_dual_unitary(Operator(kicked_ising_gate(LONGITUDINAL_FIELD, b)).data)
+    print(f"gate: h={LONGITUDINAL_FIELD}, b=pi/4-{epsilon} -> "
+          f"dual-unitary: {du}")
+
     target = backend.target
     e2q = float(np.median([props.error for q in target["cz"]
                            if (props := target["cz"][q]) and props.error is not None]))
@@ -93,7 +107,7 @@ def preflight(backend, t_values: tuple = T_VALUES, shots: int = SHOTS) -> dict:
 
     jobs = {}
     for T in t_values:
-        qc = build_circuit_cs(T, MIN_X, h=LONGITUDINAL_FIELD, b=TRANSVERSE_FIELD)
+        qc = build_circuit_cs(T, MIN_X, h=LONGITUDINAL_FIELD, b=b)
         targets_ = get_cs_targets(T, MIN_X)
         control = get_cs_control(T, MIN_X)
 
@@ -122,7 +136,8 @@ def preflight(backend, t_values: tuple = T_VALUES, shots: int = SHOTS) -> dict:
 
 
 def submit(backend, jobs: dict, t_values: tuple = T_VALUES,
-           shots: int = SHOTS, local: bool = False) -> None:
+           shots: int = SHOTS, local: bool = False,
+           epsilon: float = 0.0) -> None:
     from qiskit_ibm_runtime import EstimatorV2 as Estimator
 
     estimator = Estimator(mode=backend)
@@ -137,12 +152,14 @@ def submit(backend, jobs: dict, t_values: tuple = T_VALUES,
     job = estimator.run(pubs)
     print(f"submitted job {job.job_id()} -- waiting for results...")
 
+    case = "du" if epsilon == 0 else f"eps{epsilon:g}"
     run = create_run(
         "x_basis_hardware_pilot",
-        "local_test" if local else backend.name,
+        "local_test" if local else f"{backend.name}_{case}",
         params={
             "backend": backend.name, "t_values": list(t_values), "min_x": MIN_X,
-            "h": LONGITUDINAL_FIELD, "b": float(TRANSVERSE_FIELD), "shots": shots,
+            "h": LONGITUDINAL_FIELD, "b": float(TRANSVERSE_FIELD - epsilon),
+            "epsilon": float(epsilon), "shots": shots,
             "local_test": local,
             "resilience_level": 0 if local else 1, "dd": None if local else "XY4",
             "gate_twirling": not local,
@@ -179,14 +196,18 @@ def main() -> None:
                         help="end-to-end save test: run T=2 locally on FakeMiami "
                              "(Aer + noise model) and exercise the full result "
                              "parsing + data/ saving path; nothing leaves the machine")
+    parser.add_argument("--epsilon", type=float, default=0.0,
+                        help="perturbation strength: b = pi/4 - epsilon "
+                             "(0 = dual-unitary case)")
     args = parser.parse_args()
 
     if args.test_save:
         from qiskit_ibm_runtime.fake_provider import FakeMiami
         backend = FakeMiami()
         t_values = (2,)
-        jobs = preflight(backend, t_values=t_values, shots=1000)
-        submit(backend, jobs, t_values=t_values, shots=1000, local=True)
+        jobs = preflight(backend, t_values=t_values, shots=1000, epsilon=args.epsilon)
+        submit(backend, jobs, t_values=t_values, shots=1000, local=True,
+               epsilon=args.epsilon)
         return
 
     if args.fake:
@@ -200,14 +221,14 @@ def main() -> None:
             sys.exit(f"could not connect to IBM Runtime ({exc}); try --fake")
         backend = service.backend(BACKEND_NAME)
 
-    jobs = preflight(backend)
+    jobs = preflight(backend, epsilon=args.epsilon)
 
     if not args.submit:
         print("\nDRY RUN ONLY -- re-run with --submit to send to the device.")
         return
     if args.fake:
         sys.exit("refusing to --submit against a fake backend")
-    submit(backend, jobs)
+    submit(backend, jobs, epsilon=args.epsilon)
 
 
 if __name__ == "__main__":

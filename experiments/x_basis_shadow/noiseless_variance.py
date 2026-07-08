@@ -25,7 +25,7 @@ from du.simulation import (
     get_cs_control,
     kicked_ising_gate,
     is_dual_unitary,
-    run_x_basis_shadow,
+    x_basis_measurement,
 )
 
 
@@ -69,7 +69,7 @@ def main() -> None:
     for i, n in enumerate(N_SHOTS):
         print(f"[shot-count {i + 1}/{len(N_SHOTS)}] n_shots={n}: ", end="", flush=True)
         for j in range(N_REPS):
-            outcomes = run_x_basis_shadow(
+            outcomes = x_basis_measurement(
                 qc, n_shots=n, backend=None, seed=SEED + i * N_REPS + j
             )
             for k, qt in enumerate(targets):
