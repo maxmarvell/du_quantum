@@ -36,10 +36,8 @@ def _exact_profile(t: float, x_min: float, eps: float) -> np.ndarray:
     sv = Statevector(qc)
     vals = []
     for qt in get_target_qubits(t, x_min):
-        label = ["I"] * n
-        label[qt] = "X"
-        label[control] = "X"
-        vals.append(np.real(sv.expectation_value(SparsePauliOp("".join(reversed(label))))))
+        obs = SparsePauliOp.from_sparse_list([("XX", [control, qt], 1.0)], num_qubits=n)
+        vals.append(np.real(sv.expectation_value(obs)))
     return np.asarray(vals)
 
 

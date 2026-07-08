@@ -30,7 +30,6 @@ from du.simulation import (
 
 T = 3
 MIN_X = 1
-ZZ_COUPLING = np.pi / 4
 TRANSVERSE_FIELD = np.pi / 4
 LONGITUDINAL_FIELD = 0
 N_SHOTS = [500, 1000, 2000]
