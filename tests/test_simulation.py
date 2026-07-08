@@ -15,10 +15,10 @@ import pytest
 from qiskit.quantum_info import Operator, SparsePauliOp, Statevector
 
 from du.simulation import (
-    build_circuit_cs,
+    build_circuit,
     expect_x,
-    get_cs_control,
-    get_cs_targets,
+    get_control_qubit,
+    get_target_qubits,
     is_dual_unitary,
     kicked_ising_gate,
     x_basis_measurement,
@@ -30,12 +30,12 @@ TOL = 0.15
 
 def _exact_profile(t: float, x_min: float, eps: float) -> np.ndarray:
     """Exact <X_c X_qt> for every target, via statevector."""
-    qc = build_circuit_cs(t, x_min, h=0, b=np.pi / 4 - eps)
+    qc = build_circuit(t, x_min, h=0, b=np.pi / 4 - eps)
     n = qc.num_qubits
-    control = get_cs_control(t, x_min)
+    control = get_control_qubit(t, x_min)
     sv = Statevector(qc)
     vals = []
-    for qt in get_cs_targets(t, x_min):
+    for qt in get_target_qubits(t, x_min):
         label = ["I"] * n
         label[qt] = "X"
         label[control] = "X"
@@ -55,9 +55,9 @@ def test_self_dual_gate_is_dual_unitary() -> None:
 @pytest.mark.parametrize("t, x_min", [(2, 1), (3, 1)])
 def test_x_basis_measurement_recovers_du_lightcone(t: float, x_min: float) -> None:
     """One fixed all-X setting recovers edge = 1, interior = 0 (DU case)."""
-    qc = build_circuit_cs(t, x_min)  # defaults h=0, b=pi/4 (self-dual)
-    targets = get_cs_targets(t, x_min)
-    control = get_cs_control(t, x_min)
+    qc = build_circuit(t, x_min)  # defaults h=0, b=pi/4 (self-dual)
+    targets = get_target_qubits(t, x_min)
+    control = get_control_qubit(t, x_min)
 
     outcomes = x_basis_measurement(qc, n_shots=SHOTS, seed=0)
 
@@ -84,9 +84,9 @@ def test_perturbed_lightcone_signal_loss_exact() -> None:
 
 def test_perturbed_lightcone_via_x_basis_measurement() -> None:
     """The default measurement sees the signal loss too (eps=0.2, T=2)."""
-    qc = build_circuit_cs(2, 1, h=0, b=np.pi / 4 - 0.2)
-    targets = get_cs_targets(2, 1)
-    control = get_cs_control(2, 1)
+    qc = build_circuit(2, 1, h=0, b=np.pi / 4 - 0.2)
+    targets = get_target_qubits(2, 1)
+    control = get_control_qubit(2, 1)
 
     outcomes = x_basis_measurement(qc, n_shots=SHOTS, seed=0)
     edge = expect_x(outcomes, np.array([control, targets[-1]]))

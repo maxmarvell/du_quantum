@@ -4,10 +4,9 @@ The kicked-Ising gate at the self-dual point (b = pi/4) is dual-unitary; on
 the Bell-pair Choi state the operator transported to the light-cone edge is X,
 so the edge correlator <X_control X_edge> = 1 while the strict interior
 vanishes. All X-type correlators commute, so one fixed all-X measurement
-setting estimates every <X_c X_t> at once with no shadow-style 3^k penalty --
-`x_basis_measurement` is the default measurement everywhere (simulation and
-hardware; on hardware EstimatorV2 realises the same setting via observable
-grouping).
+setting estimates every <X_c X_t> at once -- `x_basis_measurement` is the
+default measurement everywhere (simulation and hardware; on hardware
+EstimatorV2 realises the same setting via observable grouping).
 """
 
 from __future__ import annotations
@@ -56,7 +55,7 @@ def _get_causal_block_dims(x: float, t: float) -> tuple[int, int]:
     return math.floor(t + 1 - x), math.ceil(t + x)
 
 
-def build_circuit_cs(
+def build_circuit(
     t: float,
     x_min: float,
     x_max: float | None = None,
@@ -87,7 +86,7 @@ def build_circuit_cs(
     return qc
 
 
-def get_cs_targets(t: float, x_min: float, x_max: float | None = None) -> list[int]:
+def get_target_qubits(t: float, x_min: float, x_max: float | None = None) -> list[int]:
     x_max = x_max or t
 
     u_max, v_min = _get_causal_block_dims(x_min, t)
@@ -98,7 +97,7 @@ def get_cs_targets(t: float, x_min: float, x_max: float | None = None) -> list[i
     return [i for i in range(u_min + v_min - parity - 1, u_max + v_max)]
 
 
-def get_cs_control(t: float, x_min: float, x_max: float | None = None) -> int:
+def get_control_qubit(t: float, x_min: float, x_max: float | None = None) -> int:
     x_max = x_max or t
 
     u, _ = _get_causal_block_dims(x_min, t)

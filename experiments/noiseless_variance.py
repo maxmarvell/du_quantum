@@ -2,14 +2,13 @@
 
 All XX-type correlators commute, so a single measurement setting -- rotate
 every qubit into X and read Z -- estimates every <X_c X_t> along the light
-cone at once, with NO 3^k penalty. Because the setting is fixed, the whole run
-is ONE circuit sampled n_shots times (Aer evolves once, samples n_shots), so
-it is memory-light and fast even at larger T.
+cone at once. Because the setting is fixed, the whole run is ONE circuit
+sampled n_shots times (Aer evolves once, samples n_shots), so it is
+memory-light and fast even at larger T.
 
-Compare against experiments/classical_shadows/noiseless_variance.py (random
-Pauli bases, 3^k = 9 variance penalty) at the same T / MIN_X: the X-basis
-single-shot sigma should be ~sqrt(1 - <XX>^2) (<= 1) versus the random
-shadow's ~sqrt(9 - <XX>^2) (~3 interior) -- roughly a 9x variance reduction.
+The single-shot sigma (std * sqrt(n), flat across shot counts) should match
+sqrt(1 - <XX>^2): ~1 in the light-cone interior and exactly 0 at the edge,
+where <XX> = 1 is deterministic.
 """
 
 from __future__ import annotations
@@ -19,10 +18,10 @@ import numpy as np
 from qiskit.quantum_info import Operator
 
 from du.simulation import (
-    build_circuit_cs,
+    build_circuit,
     expect_x,
-    get_cs_targets,
-    get_cs_control,
+    get_target_qubits,
+    get_control_qubit,
     kicked_ising_gate,
     is_dual_unitary,
     x_basis_measurement,
@@ -47,10 +46,10 @@ def main() -> None:
         f"need transverse field b = pi/4"
     )
 
-    qc = build_circuit_cs(T, MIN_X, h=LONGITUDINAL_FIELD, b=TRANSVERSE_FIELD)
+    qc = build_circuit(T, MIN_X, h=LONGITUDINAL_FIELD, b=TRANSVERSE_FIELD)
 
-    targets = get_cs_targets(T, MIN_X)
-    control = get_cs_control(T, MIN_X)
+    targets = get_target_qubits(T, MIN_X)
+    control = get_control_qubit(T, MIN_X)
 
     x_range = [round(float(x), 1) for x in np.arange(MIN_X, T + 0.5, 0.5)]
     print(

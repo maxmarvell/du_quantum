@@ -27,8 +27,8 @@ import numpy as np
 from qiskit import ClassicalRegister, QuantumCircuit, transpile
 from qiskit.quantum_info import SparsePauliOp
 
-from du.simulation import build_circuit_cs, get_cs_control, get_cs_targets
-from du.experiment_io import create_run
+from du.simulation import build_circuit, get_control_qubit, get_target_qubits
+from experiment_io import create_run
 
 
 BACKEND_NAME = "ibm_miami"
@@ -107,9 +107,9 @@ def preflight(backend, t_values: tuple = T_VALUES, shots: int = SHOTS,
 
     jobs = {}
     for T in t_values:
-        qc = build_circuit_cs(T, MIN_X, h=LONGITUDINAL_FIELD, b=b)
-        targets_ = get_cs_targets(T, MIN_X)
-        control = get_cs_control(T, MIN_X)
+        qc = build_circuit(T, MIN_X, h=LONGITUDINAL_FIELD, b=b)
+        targets_ = get_target_qubits(T, MIN_X)
+        control = get_control_qubit(T, MIN_X)
 
         tqc = best_transpile(qc, backend)
         n2q = sum(1 for inst in tqc.data if inst.operation.num_qubits == 2)
