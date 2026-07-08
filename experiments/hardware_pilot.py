@@ -40,14 +40,20 @@ DATA_ROOT = Path(__file__).resolve().parent.parent / "data"  # cwd-independent
 
 
 BACKEND_NAME = "ibm_miami"
-T_VALUES = (2, 3, 4, 5, 6)
+T_VALUES = (2, 3, 4, 5)
 MIN_X = 1
 LONGITUDINAL_FIELD = 0          # h
 TRANSVERSE_FIELD = np.pi / 4    # b = pi/4 -> self-dual (dual-unitary) point
 SHOTS = 30_000
 N_TRANSPILE_SEEDS = 6           # best-of-N Sabre; never pin a linear chain
 SHOT_CYCLE_S = 260e-6           # ~circuit + readout + default rep_delay
-TREX_OVERHEAD = 3.0             # rough factor for readout-twirl calibration
+# QPU cost is dominated by per-circuit overhead, not shots (measured on
+# run_0005: 735 s for ~2400 circuits ~ 0.3 s each; raw shot time was 39 s).
+# The server default twirling (64 shots/randomization -> 469 circuits/PUB at
+# 30k shots) is what made run_0005 cost 6x the naive estimate, so we cap it.
+N_TWIRL_RANDOMIZATIONS = 64     # per PUB; standard twirl count, 7x fewer circuits
+TREX_CIRCUITS_PER_PUB = 32      # approx measurement-noise-learning circuits
+CIRCUIT_OVERHEAD_S = 0.30       # per-circuit load/switch cost (run_0005 measured)
 
 
 def xx_observables(n_qubits: int, control: int, targets: list[int]) -> list[SparsePauliOp]:
@@ -166,9 +172,12 @@ def preflight(backend, t_values: tuple = T_VALUES, shots: int = SHOTS,
         print(f"{T:>3} {qc.num_qubits:>6} {n2q:>5} {dur * 1e6:>8.1f} {F:>7.3f} "
               f"{xx_str} {'YES' if bad else 'no':>8}")
 
-    qpu_s = len(t_values) * shots * SHOT_CYCLE_S * TREX_OVERHEAD
+    shots_per_rand = max(1, shots // N_TWIRL_RANDOMIZATIONS)
+    n_circuits = len(t_values) * (N_TWIRL_RANDOMIZATIONS + TREX_CIRCUITS_PER_PUB)
+    qpu_s = n_circuits * (CIRCUIT_OVERHEAD_S + shots_per_rand * SHOT_CYCLE_S)
     print(f"\nestimated QPU time: ~{qpu_s:.0f} s "
-          f"({len(t_values)} PUBs x {shots} shots, ~x{TREX_OVERHEAD:.0f} TREX overhead)")
+          f"({n_circuits} circuits x ~{CIRCUIT_OVERHEAD_S:.2f} s overhead + "
+          f"{shots} shots/PUB; validated against run_0005's 735 s)")
     return jobs
 
 
@@ -215,6 +224,11 @@ def submit(backend, jobs: dict, t_values: tuple = T_VALUES,
         estimator.options.dynamical_decoupling.enable = True
         estimator.options.dynamical_decoupling.sequence_type = "XY4"
         estimator.options.twirling.enable_gates = True  # Pauli-twirl 2q gates
+        # Cap randomizations: server 'auto' is 64 shots/randomization, which
+        # at 30k shots meant ~469 circuits/PUB and 735 s billed on run_0005.
+        estimator.options.twirling.num_randomizations = N_TWIRL_RANDOMIZATIONS
+        estimator.options.twirling.shots_per_randomization = max(
+            1, shots // N_TWIRL_RANDOMIZATIONS)
 
     # Run folder + full provenance BEFORE submitting, so a paid job can never
     # be orphaned by a save-side failure.
