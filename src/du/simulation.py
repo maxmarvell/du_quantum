@@ -2,29 +2,36 @@ from __future__ import annotations
 
 import numpy as np
 import math
-from scipy.linalg import expm
 
 from qiskit import QuantumCircuit, transpile, ClassicalRegister
-from qiskit.circuit.library import UnitaryGate
+from qiskit.circuit import Gate
+from qiskit.quantum_info import Statevector
 from qiskit_aer import AerSimulator
-from qiskit_aer.noise import NoiseModel, depolarizing_error
 
 
-_X = np.array([[0, 1], [1, 0]], dtype=complex)
-_Y = np.array([[0, -1j], [1j, 0]], dtype=complex)
-_Z = np.array([[1, 0], [0, -1]], dtype=complex)
-_XX = np.kron(_X, _X)
-_YY = np.kron(_Y, _Y)
-_ZZ = np.kron(_Z, _Z)
+def kicked_ising_gate(h: float, b: float) -> Gate:
+    sub = QuantumCircuit(2, name="KI")
+    sub.rz(2 * h, 1)
+    sub.rzz(np.pi / 2, 0, 1)  # J = pi/4
+    sub.rx(2 * b, 0)
+    sub.rx(2 * b, 1)
+    sub.rzz(np.pi / 2, 0, 1)  # J = pi/4
+    sub.rz(2 * h, 1)
+    return sub.to_gate()
 
 
-def du_gate(J: float) -> np.ndarray:
-    H = (np.pi / 4) * (_XX + _YY) + J * _ZZ
-    return expm(-1j * H)
+def is_unitary(U, atol=1e-12):
+    U = np.asarray(U)
+    n = U.shape[0]
+    return np.allclose(U.conj().T @ U, np.eye(n), atol=atol)
 
 
-def perturbed_du_gate(J: float, eps: float, P: np.ndarray) -> np.ndarray:
-    return expm(-1j * eps * P) @ du_gate(J)
+def reshuffle(U):
+    return U.reshape(2, 2, 2, 2).transpose(0, 2, 1, 3).reshape(4, 4)
+
+
+def is_dual_unitary(U, atol=1e-12):
+    return is_unitary(U, atol) and is_unitary(reshuffle(U), atol)
 
 
 def _bell_pairs(qc: QuantumCircuit, N: int) -> None:
@@ -33,123 +40,35 @@ def _bell_pairs(qc: QuantumCircuit, N: int) -> None:
         qc.cx(i, i + N)
 
 
-def _brickwork_layer(qc: QuantumCircuit, N: int,
-                     gate: UnitaryGate, offset: int) -> None:
-    for i in range(offset, N - 1, 2):
-        qc.append(gate, [i, i + 1])
-
-
-def get_causal_block_dims(x: float, t: float) -> tuple[int, int]:
+def _get_causal_block_dims(x: float, t: float) -> tuple[int, int]:
     return math.floor(t + 1 - x), math.ceil(t + x)
 
 
-def build_circuit(N: int, depth: int, J: float, eps: float,
-                  P: np.ndarray | None = None) -> QuantumCircuit:
-    """2N-qubit Choi circuit: Bell-pair prep + `depth` brickwork layers on A."""
-    qc = QuantumCircuit(2 * N)
-    _bell_pairs(qc, N)
-    gate = UnitaryGate(perturbed_du_gate(J, eps, P))
-    for t in range(depth):
-        _brickwork_layer(qc, N, gate, offset=t % 2)
-    return qc
+def get_n_qubits(t: float, x: float) -> int:
+    u, v = _get_causal_block_dims(x, t)
+    return int(u + v) * 2
 
 
-def _build_causal_block_circuit(x: float, t: float, gate: UnitaryGate) -> QuantumCircuit:
+def build_circuit(
+    t: float, x: float, h: float = 0, b: float = np.pi / 4, O: str = "XX"
+) -> QuantumCircuit:
 
-    u, v = get_causal_block_dims(x, t)
+    u, v = _get_causal_block_dims(x, t)
 
-    n_qubits = (u + v)
+    n_qubits = u + v
     qc = QuantumCircuit(2 * n_qubits)
     _bell_pairs(qc, n_qubits)
+
+    gate = kicked_ising_gate(h, b)
 
     for i in range(v):
         for j in range(u + i, i, -1):
-            qc.append(gate, [j-1, j])
-
-    return qc
-
-
-def _build_causal_cone_circuit(x_min: float, t: float, gate: UnitaryGate) -> QuantumCircuit:
-
-    u_min, v_min = get_causal_block_dims(x_min, t)
-    _, v_max = get_causal_block_dims(t, t)
-
-    n_qubits = u_min + v_max
-    qc = QuantumCircuit(2 * n_qubits)
-    _bell_pairs(qc, n_qubits)
-
-    for i in range(v_min):
-        for j in range(u_min + i, i, -1):
-            qc.append(gate, [j-1, j])
-
-    for _i, i in enumerate(range(v_min, v_max)):
-        for j in range(u_min + v_min, i + 1, -1):
-            qc.append(gate, [j + _i - 1, j + _i])
-
-    return qc
-
-
-def _append_pauli_measure(qc: QuantumCircuit, bases: np.ndarray) -> QuantumCircuit:
-    """Rotate each qubit into the chosen Pauli basis, then measure all-to-all."""
-    n = qc.num_qubits
-    creg = ClassicalRegister(n, "shadow")
-    qc = qc.copy()
-    qc.add_register(creg)
-    for q, b in enumerate(bases):
-        if b == 0:        # X: H
-            qc.h(q)
-        elif b == 1:      # Y: S† H
-            qc.sdg(q); qc.h(q)
-        # b == 2 is Z, no rotation
-        qc.measure(q, creg[q])
-    return qc
-
-
-def classical_shadow(qc: QuantumCircuit, n_shots: int,
-                     backend: AerSimulator | None = None,
-                     seed: int | None = None,
-                     ) -> tuple[np.ndarray, np.ndarray]:
-    """Random-Pauli classical shadow of `qc`.
-
-    Returns (bases, outcomes), each of shape (n_shots, n_qubits), with
-    bases ∈ {0:X, 1:Y, 2:Z} and outcomes ∈ {0,1}.
-    """
-    rng = np.random.default_rng(seed)
-    n = qc.num_qubits
-    bases = rng.integers(0, 3, size=(n_shots, n))
-
-    circuits = [_append_pauli_measure(qc, bases[s]) for s in range(n_shots)]
-    backend = backend or AerSimulator()
-    circuits = transpile(circuits, backend)
-    result = backend.run(circuits, shots=1).result()
-
-    outcomes = np.empty((n_shots, n), dtype=np.int8)
-    for s in range(n_shots):
-        bitstr = next(iter(result.get_counts(s)))   # one shot per circuit
-        outcomes[s] = np.fromiter(reversed(bitstr), dtype=np.int8)  # little-endian
-    return bases, outcomes
-
-
-def expect_pauli(bases: np.ndarray, outcomes: np.ndarray,
-                 support: np.ndarray, paulis: np.ndarray) -> float:
-    """Shadow estimate of <P> for a Pauli P with non-identity Paulis `paulis`
-    ({0:X, 1:Y, 2:Z}) on sites `support`."""
-    hit = np.all(bases[:, support] == paulis, axis=1)
-    signs = np.prod(1 - 2 * outcomes[:, support], axis=1)
-    return (3 ** len(support)) * np.mean(hit * signs)
-
-
-def build_and_measure(x: float, t: float, gate: UnitaryGate, O: str = 'ZZ') -> QuantumCircuit:
-
-    qc = _build_causal_block_circuit(x, t, gate)
-
-    u, v = get_causal_block_dims(x, t)
-    n_qubits = u + v
+            qc.append(gate, [j - 1, j])
 
     target_qubit_0 = u - 1
     target_qubit_1 = u + int(2 * x) - 1
 
-    if O == 'XX':
+    if O == "XX":
         qc.h(target_qubit_0 + n_qubits)
         qc.h(target_qubit_1)
 
@@ -161,83 +80,188 @@ def build_and_measure(x: float, t: float, gate: UnitaryGate, O: str = 'ZZ') -> Q
 
     return qc
 
-_AER_BASIS = ["cx", "rz", "sx", "x", "h", "id"]
+def estimate_correlator(
+    qc: QuantumCircuit,
+    n_shots: int,
+    backend: AerSimulator | None = None,
+    seed: int | None = None,
+) -> np.float64:
+
+    backend = backend or AerSimulator()
+    tqc = transpile(qc, backend)
+    counts = backend.run(tqc, shots=n_shots, seed_simulator=seed).result().get_counts()
+    p1 = counts.get('1', 0) / n_shots
+    return 1 - 2 * p1
 
 
-def make_depolarizing_noise(two_qubit_err: float = 5e-3,
-                            one_qubit_err: float = 1e-4) -> NoiseModel:
-    nm = NoiseModel(basis_gates=_AER_BASIS)
-    err1 = depolarizing_error(one_qubit_err, 1)
-    err2 = depolarizing_error(two_qubit_err, 2)
-    for g in ("h", "rz", "sx", "x"):
-        nm.add_all_qubit_quantum_error(err1, [g])
-    nm.add_all_qubit_quantum_error(err2, ["cx"])
-    return nm
+### Classical shadows
+
+def build_circuit_cs(
+    t: float,
+    x_min: float,
+    x_max: float | None = None,
+    h: float = 0,
+    b: float = np.pi / 4,
+) -> QuantumCircuit:
+
+    if x_max is not None:
+        raise NotImplementedError("Need to implement differnt causal blocks")
+
+    u_max, v_min = _get_causal_block_dims(x_min, t)
+    _, v_max = _get_causal_block_dims(t, t)
+
+    n_qubits = u_max + v_max
+    qc = QuantumCircuit(2 * n_qubits)
+    _bell_pairs(qc, n_qubits)
+
+    gate = kicked_ising_gate(h, b)
+
+    for i in range(v_min):
+        for j in range(u_max + i, i, -1):
+            qc.append(gate, [j - 1, j])
+
+    for _i, i in enumerate(range(v_min, v_max)):
+        for j in range(u_max + v_min, i + 1, -1):
+            qc.append(gate, [j + _i - 1, j + _i])
+
+    return qc
 
 
-def make_du_gate_noise(p: float) -> NoiseModel:
-    """Depolarizing noise on each DU UnitaryGate (the 'unitary' instruction)."""
-    nm = NoiseModel()
-    nm.add_all_qubit_quantum_error(depolarizing_error(p, 2), ["unitary"])
-    return nm
+def _append_pauli_measure(qc: QuantumCircuit, bases: np.ndarray) -> QuantumCircuit:
+    n = qc.num_qubits
+    creg = ClassicalRegister(n, "shadow")
+    qc = qc.copy()
+    qc.add_register(creg)
+    for q, b in enumerate(bases):
+        if b == 0:  # X: H
+            qc.h(q)
+        elif b == 1:  # Y: S† H
+            qc.sdg(q)
+            qc.h(q)
+        # b == 2 is Z, no rotation
+        qc.measure(q, creg[q])
+    return qc
 
 
-def make_miami_backend() -> AerSimulator:
-    from qiskit_ibm_runtime.fake_provider import FakeMiami
-    return AerSimulator.from_backend(FakeMiami())
-
-
-def fold_gates(qc: QuantumCircuit, scale_factor: int) -> QuantumCircuit:
-    if scale_factor < 1 or scale_factor % 2 == 0:
-        raise ValueError("scale_factor must be an odd positive integer")
-    n_extra = (scale_factor - 1) // 2
-    out = qc.copy_empty_like()
-    for instr in qc.data:
-        out.append(instr)
-        if n_extra and instr.operation.name in {"barrier", "measure"}:
-            continue
-        for _ in range(n_extra):
-            out.append(instr.operation.inverse(), instr.qubits)
-            out.append(instr.operation, instr.qubits)
-    return out
-
-
-def _counts_to_z_expectation(counts: dict[str, int], shots: int) -> float:
-    p0 = counts.get("0", 0) / shots
-    p1 = counts.get("1", 0) / shots
-    return p0 - p1
-
-
-def correlator_noisy(x: float, t: float, J: float, eps: float,
-                     O: str = "ZZ",
-                     noise_model: NoiseModel | None = None,
-                     backend: AerSimulator | None = None,
-                     scale_factor: int = 1,
-                     shots: int = 4096,
-                     P: np.ndarray | None = None) -> float:
-    
-    U = du_gate(J) if P is None else perturbed_du_gate(J, eps, P)
-    gate = UnitaryGate(U)
-    qc = build_and_measure(x, t, gate, O=O)
-
+def _is_noiseless_aer(backend: AerSimulator | None) -> bool:
     if backend is None:
-        if noise_model is not None:
-            backend = AerSimulator(noise_model=noise_model)
-        else:
-            backend = make_miami_backend()
+        return True
+    if not isinstance(backend, AerSimulator):
+        return False
+    return getattr(backend.options, "noise_model", None) is None
 
-    qc_t = transpile(qc, backend=backend, optimization_level=0)
-    if scale_factor != 1:
-        qc_t = fold_gates(qc_t, scale_factor)
 
-    counts = backend.run(qc_t, shots=shots).result().get_counts()
-    return _counts_to_z_expectation(counts, shots)
+def run_classical_shadow(
+    qc: QuantumCircuit,
+    n_shots: int,
+    backend: AerSimulator | None = None,
+    seed: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+
+    rng = np.random.default_rng(seed)
+    n = qc.num_qubits
+    bases = rng.integers(0, 3, size=(n_shots, n))
+    backend = backend or AerSimulator()
+
+    if _is_noiseless_aer(backend):
+        source = QuantumCircuit(n)
+        source.set_statevector(Statevector(qc))
+    else:
+        source = qc
+
+    outcomes = np.empty((n_shots, n), dtype=np.int8)
+    for s in range(n_shots):
+        circuit = transpile(_append_pauli_measure(source, bases[s]), backend)
+        shot_seed = None if seed is None else seed + s
+        result = backend.run(circuit, shots=1, seed_simulator=shot_seed).result()
+        bitstr = next(iter(result.get_counts()))
+        outcomes[s] = np.fromiter(reversed(bitstr), dtype=np.int8)  # little-endian
+    return bases, outcomes
+
+
+def run_x_basis_shadow(
+    qc: QuantumCircuit,
+    n_shots: int,
+    backend: AerSimulator | None = None,
+    seed: int | None = None,
+) -> np.ndarray:
+    
+    n = qc.num_qubits
+    backend = backend or AerSimulator()
+
+    if _is_noiseless_aer(backend):
+        meas = QuantumCircuit(n)
+        meas.set_statevector(Statevector(qc))
+    else:
+        meas = qc.copy()
+
+    creg = ClassicalRegister(n, "x")
+    meas.add_register(creg)
+    for q in range(n):
+        meas.h(q)
+        meas.measure(q, creg[q])
+
+    meas = transpile(meas, backend)
+    counts = backend.run(meas, shots=n_shots, seed_simulator=seed).result().get_counts()
+
+    outcomes = np.empty((n_shots, n), dtype=np.int8)
+    s = 0
+    for bitstr, c in counts.items():
+        outcomes[s:s + c] = np.fromiter(reversed(bitstr), dtype=np.int8)
+        s += c
+    return outcomes
+
+
+def expect_x(outcomes: np.ndarray, support: np.ndarray) -> float:
+    signs = np.prod(1 - 2 * outcomes[:, support], axis=1)
+    return float(np.mean(signs))
+
+
+def get_cs_targets(t: float, x_min: float, x_max: float | None = None) -> list[int]:
+    x_max = x_max or t
+
+    u_max, v_min = _get_causal_block_dims(x_min, t)
+    u_min, v_max = _get_causal_block_dims(x_max, t)
+
+    parity = (t - x_min) % 1 != 0
+
+    return [i for i in range(u_min + v_min - parity - 1, u_max + v_max)]
+
+
+def get_cs_control(t: float, x_min: float, x_max: float | None = None) -> int:
+    x_max = x_max or t
+
+    u, _ = _get_causal_block_dims(x_min, t)
+    _, v = _get_causal_block_dims(x_max, t)
+
+    return 2 * u + v - 1
+
+
+def expect_pauli(
+    bases: np.ndarray, outcomes: np.ndarray, support: np.ndarray, paulis: np.ndarray
+) -> float:
+    hit = np.all(bases[:, support] == paulis, axis=1)
+    signs = np.prod(1 - 2 * outcomes[:, support], axis=1)
+    return (3 ** len(support)) * np.mean(hit * signs)
 
 
 if __name__ == "__main__":
+    x_min = 2
+    t = 5.5
+    x_max = None
 
-    J = 0.5
-    DU = du_gate(J)
-    gate = UnitaryGate(DU)
-    qc = build_and_measure(4, 4, gate)
-    qc.draw('mpl', filename='circuit.png')
+    x_max = x_max or t
+
+    u_max, v_min = _get_causal_block_dims(x_min, t)
+    u_min, v_max = _get_causal_block_dims(x_max, t)
+
+    parity = (t - x_min) % 1 == 0
+
+    print(u_max, v_max, u_min, v_min, parity)
+
+    print(get_cs_targets(t, x_min))
+
+    qc = build_circuit_cs(t, x_min)
+    qc.draw("mpl", filename="circuit.png")
+
+    print(get_cs_control(t, x_min))

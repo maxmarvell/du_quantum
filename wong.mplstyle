@@ -1,0 +1,48 @@
+# Max's personal matplotlib style — "wong"
+# Self-contained: reproduces seaborn-v0_8-darkgrid + Wong colorblind-safe
+# palette + LaTeX serif fonts. Apply with:
+#     import matplotlib.pyplot as plt
+#     plt.style.use("wong.mplstyle")
+# (or layer it: plt.style.use(["seaborn-v0_8-darkgrid", "wong.mplstyle"]))
+
+# ---- Color cycle: Wong colorblind-safe palette --------------------------
+# blue, black, pink, vermilion, orange, green, sky, yellow
+axes.prop_cycle: cycler('color', ['0072B2', '000000', 'CC79A7', 'D55E00', 'E69F00', '009E73', '56B4E9', 'F0E442'])
+
+# ---- Fonts (LaTeX serif) ------------------------------------------------
+# NOTE: text.usetex=True requires a working LaTeX install (latex/dvipng).
+# If LaTeX is unavailable, set text.usetex to False and font.family to sans-serif.
+text.usetex:          True
+text.latex.preamble:  \usepackage{amsmath} \usepackage{bbold}
+font.family:          serif
+font.size:            10
+axes.labelsize:       10
+legend.fontsize:      8
+xtick.labelsize:      8
+ytick.labelsize:      8
+
+# ---- seaborn darkgrid look (baked in for a single-file drop-in) ---------
+figure.facecolor:     white
+axes.facecolor:       EAEAF2
+axes.edgecolor:       white
+axes.linewidth:       0
+axes.grid:            True
+axes.axisbelow:       True
+grid.color:           white
+grid.linestyle:       -
+grid.linewidth:       1
+axes.labelcolor:      .15
+text.color:           .15
+xtick.color:          .15
+ytick.color:          .15
+xtick.direction:      out
+ytick.direction:      out
+xtick.major.size:     0
+ytick.major.size:     0
+xtick.minor.size:     0
+ytick.minor.size:     0
+legend.frameon:       False
+
+# ---- Export -------------------------------------------------------------
+savefig.dpi:          300
+savefig.bbox:         tight

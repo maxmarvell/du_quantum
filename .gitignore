@@ -11,3 +11,9 @@ wheels/
 
 # Local data artifacts
 data/*.pkl
+
+# Run outputs / scratch artifacts
+data/
+.vscode/
+circuit.png
+test.png
