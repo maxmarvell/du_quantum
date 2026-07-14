@@ -14,6 +14,7 @@ data/*.pkl
 
 # Run outputs / scratch artifacts
 data/
+sources/
 .vscode/
 circuit.png
 test.png
