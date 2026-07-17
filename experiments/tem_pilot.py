@@ -9,7 +9,7 @@ from qiskit import qpy
 
 from du.simulation import build_circuit, get_control_qubit, get_target_qubits
 from du.utils import best_transpile, xx_observables
-from experiment_io import Run, create_run, open_run
+from du.experiments import Run, create_run, open_run
 
 DATA_ROOT = Path(__file__).resolve().parent.parent / "data"  # cwd-independent
 
@@ -128,10 +128,16 @@ def preflight(
     nl_lo = 2 * nl_per_layer * cycle  # best case: PUB layouts coincide
     nl_hi = TEM_OPTIONS["max_layers_to_learn"] * nl_per_layer * cycle  # all distinct
     print(
-        f"\nestimated QPU time: ~{meas_s + nl_lo:.0f}-{meas_s + nl_hi:.0f} s "
-        f"(measurement {meas_s:.0f} s = {len(t_values)} PUBs x {shots} shots x "
-        f"{cycle * 1e3:.1f} ms/shot; noise learning {nl_lo:.0f}-{nl_hi:.0f} s; "
-        f"+ readout calibration)"
+        f"\ntrue QPU runtime estimate: ~{meas_s + nl_lo:.0f}-{meas_s + nl_hi:.0f} s "
+        f"({(meas_s + nl_lo) / 60:.1f}-{(meas_s + nl_hi) / 60:.1f} min)\n"
+        f"  noise learning {nl_lo:.0f}-{nl_hi:.0f} s "
+        f"(2-{TEM_OPTIONS['max_layers_to_learn']} unique layers x "
+        f"{nl_per_layer} shots x {cycle * 1e3:.1f} ms/shot, "
+        f"validated to <1% on the T=2 probe)\n"
+        f"  measurement {meas_s:.0f} s "
+        f"({len(t_values)} PUBs x {shots} shots x {cycle * 1e3:.1f} ms/shot)\n"
+        f"  (ignore IBM's dashboard estimate -- it omits the x9 learning bases "
+        f"and miami's 4 ms rep_delay)"
     )
     return jobs
 

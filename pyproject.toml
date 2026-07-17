@@ -26,7 +26,7 @@ dev = ["pytest>=8"]
 packages = ["src/du"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"src/du/_tem/tem_propagate.jl" = "du/_tem/tem_propagate.jl"
+"src/du/wong.mplstyle" = "du/wong.mplstyle"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

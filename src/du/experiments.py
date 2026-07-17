@@ -1,30 +1,3 @@
-"""Canonical experiment data layout for Python projects.
-
-Directory structure produced::
-
-    data/
-      {canonical_folder}/
-        run_0001_{optional_name}/
-          data.npz            # main output arrays (canonical name)
-          metadata.json       # run parameters + provenance (run-folder top level)
-          plots/              # figures for this run
-          {heavy_subfolder}/  # e.g. two_body_rdm/L_20.npz per system size
-
-Usage::
-
-    from experiment_io import create_run, latest_run
-
-    run = create_run("dmrg_sweep", "bond2000", params={"L": 20, "chi": 2000})
-    # ... compute ...
-    run.save_data(energy=E, entropy=S)                 # -> data.npz
-    run.save_array("two_body_rdm", "L_20", rdm=rdm)    # -> two_body_rdm/L_20.npz
-    fig.savefig(run.plots / "energy.pdf")              # plots/ auto-created
-    run.save_metadata({"converged": True})             # merge more into metadata.json
-
-    prev = latest_run("dmrg_sweep")                    # reopen most recent run
-    arrays = prev.load_data()                          # dict from data.npz
-"""
-
 from __future__ import annotations
 
 import json

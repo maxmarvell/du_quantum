@@ -9,7 +9,7 @@ from qiskit import qpy
 
 from du.simulation import build_circuit, get_control_qubit, get_target_qubits
 from du.utils import best_transpile, xx_observables
-from experiment_io import Run, create_run, open_run
+from du.experiments import Run, create_run, open_run
 
 DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
 
